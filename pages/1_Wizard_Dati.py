@@ -17,11 +17,18 @@ if 'tipo_struttura' not in st.session_state:
 # --- FINE BLOCCO ---
 
 # --- CONFIGURAZIONE E HELPER ---
+# NUOVO BLOCCO CORRETTO
 BASE_DIR = os.getcwd() 
 DATA_DIR = os.path.join(BASE_DIR, 'data')
-DB_PATH = os.path.join(BASE_DIR, 'db', 'imported_data.sqlite')
 MAPPING_BASE_DIR = os.path.join(BASE_DIR, 'mapping')
 EXPORT_BASE_DIR = os.path.join(BASE_DIR, 'export')
+
+# Modifica qui: Il DB ora viene salvato nella cartella principale
+DB_PATH = os.path.join(BASE_DIR, 'imported_data.sqlite') 
+
+# Ora non creiamo più la cartella 'db', perché non serve
+for path in [DATA_DIR, MAPPING_BASE_DIR, EXPORT_BASE_DIR]:
+    os.makedirs(path, exist_ok=True)
 
 try:
     engine = create_engine(f'sqlite:///{DB_PATH}')
