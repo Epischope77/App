@@ -283,7 +283,7 @@ def step_3_upload_appoggio(config, engine):
             c2.button("🗑️ Rimuovi", key=f"remove_appoggio_{mode_name}_{i}", on_click=delete_file, args=(config["appoggio_dir"], filename))
     except FileNotFoundError: st.warning("Cartella non ancora creata.")
 
-# In pages/1_Wizard_Dati.py
+# SOSTITUISCI IL TUO step_4 CON QUESTA VERSIONE POTENZIATA
 def step_4_import_appoggio(config, engine):
     mode_name = config['mode'].capitalize()
     st.header(f"Step 5: Importa Dati di Appoggio ({mode_name})")
@@ -294,9 +294,8 @@ def step_4_import_appoggio(config, engine):
     if not files: 
         st.warning('Nessun file trovato.'); return
     
-    # --> MODIFICA QUI: 'default=files' preseleziona tutti i file trovati.
     selected_files = st.multiselect(
-        'Seleziona file', 
+        'Seleziona file da importare', 
         files, 
         default=files, 
         key=f'appoggio_ms_{mode_name}'
@@ -308,9 +307,45 @@ def step_4_import_appoggio(config, engine):
         with st.spinner("Importazione..."):
             for file_name in selected_files:
                 try:
-                    # ... (la logica interna rimane invariata)
-                    df = pd.read_excel(os.path.join(config["appoggio_dir"], file_name), header=header_row - 1, dtype=str).fillna('')
+                    file_path = os.path.join(config["appoggio_dir"], file_name)
                     
+                    # --- BLOCCO AGGIUNTO: ESTRAZIONE COMMENTI CON OPENPYXL ---
+                    st.write(f"Estrazione commenti da `{file_name}`...")
+                    workbook = openpyxl.load_workbook(file_path)
+                    sheet = workbook.active
+                    
+                    comments_map = {}
+                    # Itera sulle celle della riga di intestazione specificata
+                    for cell in sheet[header_row]:
+                        if cell.comment and cell.value:
+                            # Pulisce il nome della colonna e il testo del commento
+                            sanitized_header = sanitize_column_name(cell.value)
+                            # --- INIZIO BLOCCO DI PULIZIA COMMENTO ---
+                            raw_text = cell.comment.text
+                            
+                            # Cerca la posizione dei primi due punti ":"
+                            colon_position = raw_text.find(':')
+                            
+                            # Se li trova, prende solo il testo che viene DOPO. Altrimenti, prende tutto.
+                            if colon_position != -1:
+                                comment_text = raw_text[colon_position + 1:].strip()
+                            else:
+                                comment_text = raw_text.strip()
+                            
+                            comments_map[sanitized_header] = comment_text
+                            # --- FINE BLOCCO DI PULIZIA COMMENTO ---
+                                                
+                    # Salva i commenti in un file JSON dedicato
+                    comments_path = os.path.join(config["mapping_dir"], "appoggio_comments.json")
+                    with open(comments_path, 'w', encoding='utf-8') as f:
+                        json.dump(comments_map, f, indent=4)
+                    
+                    if comments_map:
+                        st.success(f"Trovati e salvati {len(comments_map)} commenti.")
+                    # --- FINE BLOCCO AGGIUNTO ---
+
+                    # La logica originale per leggere i dati e salvarli nel DB rimane invariata
+                    df = pd.read_excel(file_path, header=header_row - 1, dtype=str).fillna('')
                     pretty_name_map = {sanitize_column_name(col): str(col).strip() for col in df.columns}
                     df.columns = [sanitize_column_name(col) for col in df.columns]
 
@@ -354,8 +389,16 @@ def step_5_mappatura_globale(config, engine):
             cols = pd.read_sql(f'SELECT * FROM "{table}" LIMIT 0', engine).columns
             unique_dest_cols.update(cols)
         sorted_unique_cols = sorted(list(unique_dest_cols))
-
         dest_options = ["-- Non mappare --", "Nascondi"] + sorted_unique_cols
+
+        # --- BLOCCO AGGIUNTO: CARICAMENTO COMMENTI ---
+        comments_path = os.path.join(config["mapping_dir"], "appoggio_comments.json")
+        comments_map = {}
+        if os.path.exists(comments_path):
+            with open(comments_path, 'r', encoding='utf-8') as f:
+                comments_map = json.load(f)
+        # --- FINE BLOCCO AGGIUNTO ---
+
 
         # --- 2. GESTIONE STATO CENTRALE ---
         live_mapping_state_key = f"live_mapping_state_{mode}"
@@ -418,13 +461,34 @@ def step_5_mappatura_globale(config, engine):
         paginated_cols = cols_to_display[start_index:end_index]
 
         st.write(f"**Sorgente: {get_pretty_name(appoggio_table_name)}**")
+        
         for col in paginated_cols: # Rendering dei widget
             source_key = f"{appoggio_table_name}.{col}"
             default_sel = st.session_state[live_mapping_state_key].get(source_key, dest_options[0])
             default_idx = dest_options.index(default_sel) if default_sel in dest_options else 0
-            st.selectbox(f"`{get_pretty_name(col)}` →", options=dest_options, index=default_idx,
-                         key=f"map_global_{source_key}_{mode}", format_func=get_pretty_name,
-                         on_change=update_live_mapping, args=(source_key,))
+
+            # --- INIZIO BLOCCO COMMENTI INTEGRATO ---
+            pretty_label = get_pretty_name(col)
+            comment_text = comments_map.get(col) # Cerca il commento per la colonna sanificata
+
+            # Aggiungi un'icona 💬 se il commento esiste
+            label_to_show = f"`{pretty_label}` → 💬" if comment_text else f"`{pretty_label}` →"
+
+            # Crea il widget selectbox usando l'etichetta e l'aiuto a comparsa
+            scelta = st.selectbox(
+                label_to_show,
+                options=dest_options,
+                index=default_idx,
+                key=f"map_global_{source_key}_{mode}", # Manteniamo la tua chiave originale
+                format_func=get_pretty_name,
+                on_change=update_live_mapping, # Manteniamo la tua callback originale
+                args=(source_key,),            # Manteniamo i tuoi args originali
+                help=comment_text # <-- Mostra il commento completo al passaggio del mouse
+            )
+            # La logica per 'new_mapping' non è nel tuo snippet, ma andrebbe qui
+            # if scelta != "-- Non mappare --":
+            #     new_mapping[source_key] = scelta
+            # --- FINE BLOCCO COMMENTI INTEGRATO ---
 
         if total_pages > 1: # Navigazione di pagina
             st.markdown("---")
@@ -453,6 +517,8 @@ def step_5_mappatura_globale(config, engine):
                                            key=f'studio_col_selector_{mode}', format_func=get_pretty_name)
         
         st.markdown("---")
+
+
 
         # --- 6. AZIONI SUL TEMPLATE E SALVATAGGIO (REINTEGRATE) ---
         
